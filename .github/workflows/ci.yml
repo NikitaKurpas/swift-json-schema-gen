@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Swift 6.3 / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Swift 6.3.3
+        uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
+        with:
+          swift-version: 6.3.3
+
+      - name: Show toolchain
+        run: swiftc --version
+
+      - name: Check formatting
+        run: Scripts/check-format.sh
+
+      - name: Run package tests
+        run: swift test -q
+
+      - name: Verify library consumer
+        run: Scripts/test-library.sh
+
+      - name: Verify build-tool plugin consumer
+        run: Scripts/test-plugin.sh
+
+      - name: Build release products
+        run: swift build -q --configuration release
+
+      - name: Verify portable release archive
+        run: Scripts/test-release.sh dev

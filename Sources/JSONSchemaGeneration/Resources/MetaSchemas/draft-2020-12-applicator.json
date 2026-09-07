@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://json-schema.org/draft/2020-12/meta/applicator",
+  "$dynamicAnchor": "meta",
+  "title": "Applicator vocabulary meta-schema",
+  "type": [
+    "object",
+    "boolean"
+  ],
+  "properties": {
+    "prefixItems": {},
+    "items": {},
+    "contains": {},
+    "additionalProperties": {},
+    "properties": {},
+    "patternProperties": {},
+    "dependentSchemas": {},
+    "propertyNames": {},
+    "if": {},
+    "then": {},
+    "else": {},
+    "allOf": {},
+    "anyOf": {},
+    "oneOf": {},
+    "not": {}
+  }
+}

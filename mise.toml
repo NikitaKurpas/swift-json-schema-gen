@@ -1,0 +1,26 @@
+[tools]
+swift = "6.3.3"
+
+[tasks.build]
+description = "Build all products in release mode"
+run = "swift build -q --configuration release"
+
+[tasks.test]
+description = "Run package and build-tool plugin tests"
+run = [
+  "swift test -q",
+  "Scripts/test-library.sh",
+  "Scripts/test-plugin.sh",
+]
+
+[tasks.format]
+description = "Format package Swift sources"
+run = "Scripts/swift-format.sh format --in-place --recursive --parallel Package.swift Plugins Sources Tests"
+
+[tasks.lint]
+description = "Check package Swift formatting"
+run = "Scripts/check-format.sh"
+
+[tasks.release-check]
+description = "Build and smoke-test a local release archive"
+run = "Scripts/test-release.sh dev"

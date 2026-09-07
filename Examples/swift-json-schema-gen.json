@@ -1,0 +1,8 @@
+{
+  "schemas": [
+    "Schemas/pet.json"
+  ],
+  "output": "Generated/SchemaTypes.swift",
+  "sendable": true,
+  "warningsAsErrors": false
+}

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="240" viewBox="0 0 840 240" role="img" aria-labelledby="title desc">
+  <title id="title">SwiftJSONSchemaGen</title>
+  <desc id="desc">JSON braces become three ordered model fields. A coral arrow connects schema to Swift source.</desc>
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FFB36B"/>
+      <stop offset="1" stop-color="#FF5D55"/>
+    </linearGradient>
+  </defs>
+  <rect width="840" height="240" rx="32" fill="#111C2E"/>
+  <g transform="translate(36 36)">
+    <rect width="168" height="168" rx="36" fill="#1D2B42"/>
+    <g fill="none" stroke="url(#accent)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M55 35h-5q-13 0-13 14v19q0 14-13 16 13 2 13 16v19q0 14 13 14h5"/>
+      <path d="M114 35h5q13 0 13 14v19q0 14 13 16-13 2-13 16v19q0 14-13 14h-5"/>
+      <path d="M64 84h42m-13-13 13 13-13 13"/>
+    </g>
+    <g fill="#E8EFF8">
+      <rect x="65" y="49" width="37" height="6" rx="3"/>
+      <rect x="65" y="113" width="37" height="6" rx="3"/>
+    </g>
+  </g>
+  <text x="235" y="111" fill="#F2F5FA" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="43" font-weight="650" letter-spacing="-1.7">SwiftJSONSchemaGen</text>
+  <text x="238" y="152" fill="#A9BCD4" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" letter-spacing="1.1">JSON Schema → Swift Codable</text>
+</svg>

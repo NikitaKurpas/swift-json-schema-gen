@@ -1,0 +1,16 @@
+{
+  "indentation": {
+    "spaces": 4
+  },
+  "lineLength": 100,
+  "multiElementCollectionTrailingCommas": true,
+  "respectsExistingLineBreaks": true,
+  "rules": {
+    "AllPublicDeclarationsHaveDocumentation": false,
+    "AlwaysUseLowerCamelCase": false,
+    "DoNotUseSemicolons": true,
+    "OrderedImports": true,
+    "UseTripleSlashForDocumentationComments": true
+  },
+  "version": 1
+}

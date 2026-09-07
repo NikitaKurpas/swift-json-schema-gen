@@ -1,0 +1,6 @@
+{
+  "schemas": [
+    "Schemas/person.schema.json"
+  ],
+  "sendable": true
+}
