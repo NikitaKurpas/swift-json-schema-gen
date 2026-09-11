@@ -5,6 +5,9 @@
   "properties": {
     "name": {
       "type": "string"
+    },
+    "nicknameV1": {
+      "type": "string"
     }
   },
   "required": [

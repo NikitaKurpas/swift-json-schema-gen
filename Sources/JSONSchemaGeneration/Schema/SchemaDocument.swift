@@ -35,7 +35,7 @@ enum DraftVersion: String, CaseIterable, Sendable {
 
     private static func unsupportedDialect(_ value: String) -> GenerationError {
         GenerationError.schema(
-            "unsupported JSONValue Schema dialect '\(value)'; supported dialects are draft-07, 2019-09, and 2020-12"
+            "unsupported JSON Schema dialect '\(value)'; supported dialects are draft-07, 2019-09, and 2020-12"
         )
     }
 }
@@ -54,6 +54,6 @@ struct ResolvedSchema {
     let json: JSONValue
     /// RFC 3986 base URI in effect for references inside `json`.
     let effectiveBaseURL: URL
-    /// JSONValue Schema dialect in effect at the resolved schema location.
+    /// JSON Schema dialect in effect at the resolved schema location.
     let draft: DraftVersion
 }

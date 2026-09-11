@@ -139,6 +139,7 @@ struct TupleIR: Hashable {
     var elements: [TupleElementIR]
     var additionalElementType: SwiftType?
     var maximumCount: Int?
+    var isReferenceType: Bool = false
 }
 
 struct RawEnumCaseIR: Hashable {

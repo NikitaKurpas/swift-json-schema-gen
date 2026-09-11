@@ -56,7 +56,7 @@ private func decodeJSONPointerToken(_ token: String, reference: String) throws -
         let escapedIndex = token.index(after: index)
         guard escapedIndex < token.endIndex else {
             throw GenerationError.schema(
-                "invalid JSONValue Pointer escape in reference '\(reference)': '~' must be followed by '0' or '1'"
+                "invalid JSON Pointer escape in reference '\(reference)': '~' must be followed by '0' or '1'"
             )
         }
         switch token[escapedIndex] {
@@ -64,7 +64,7 @@ private func decodeJSONPointerToken(_ token: String, reference: String) throws -
         case "1": result.append("/")
         default:
             throw GenerationError.schema(
-                "invalid JSONValue Pointer escape in reference '\(reference)': '~\(token[escapedIndex])' is not valid"
+                "invalid JSON Pointer escape in reference '\(reference)': '~\(token[escapedIndex])' is not valid"
             )
         }
         index = token.index(after: escapedIndex)
@@ -83,7 +83,7 @@ private func unresolvedPointer(_ reference: String?, pointer: String, token: Str
     -> GenerationError
 {
     GenerationError.schema(
-        "unresolved JSONValue Pointer '\(displayReference(reference, pointer: pointer))': token '\(token)' does not exist"
+        "unresolved JSON Pointer '\(displayReference(reference, pointer: pointer))': token '\(token)' does not exist"
     )
 }
 

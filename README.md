@@ -4,169 +4,192 @@
 
 # SwiftJSONSchemaGen
 
-Turn JSON Schema into Swift models you can read, construct, and use with
-`JSONEncoder` and `JSONDecoder`. Generate a file from the command line, call the
-Swift library, or let SwiftPM generate models during your build.
+Generate Swift Codable models from JSON Schema—with strict union decoding,
+recursive types, offline references, and SwiftPM build integration.
 
-Generated models depend on Foundation only. Import `JSONSchemaGeneration` when
-embedding the generator; the package and command-line tool are named
-`SwiftJSONSchemaGen`.
+Use the CLI, embed the `JSONSchemaGeneration` library, or generate models during
+your build. Generated code depends on Foundation only.
 
-**Requirements:** Swift 6.3+, macOS 15+ or Linux. The generator's toolchain requirements
-are separate from the platforms supported by its generated Foundation/Codable code.
+**Swift 6.3+ · macOS 15+ or Linux · MIT**
 
-## Main features
+The requirements above apply to the generator; generated Foundation/Codable models
+have separate platform requirements.
 
-- **Codable models:** objects, arrays, primitive types, scalar enums, and constants,
-  with original JSON key spelling preserved.
-- **Presence and nullability:** required keys must exist, and non-nullable fields
-  reject explicit null even when the field is optional.
-- **Composed and recursive types:** `oneOf` and `anyOf` unions, object `allOf`
-  intersections, recursive objects, and recursive unions.
-- **Reusable schemas:** offline `$ref` resolution across supplied documents,
-  `$id` identities, anchors, JSON Pointer, and namespaced `$defs` / `definitions`.
-- **Flexible JSON:** typed or arbitrary additional properties and a generated
-  `AnyValue` for unconstrained JSON, with no third-party runtime dependency.
-- **Build integration:** direct CLI arguments, JSON configuration, an in-memory
-  Swift API, and a SwiftPM build tool plugin. Optional `Sendable` generation supports
-  concurrency-aware consumers.
-- **Reproducible workflows:** deterministic output, unchanged-file preservation,
-  `--check` for stale generated files, and human-readable or JSON diagnostics.
+## 🚀 Quickstart
 
-Draft 7, 2019-09, and 2020-12 are recognized. Some shapes have restrictions and some
-validation keywords are not enforced; see the [support matrix](Docs/SchemaSupport.md).
-
-For example, these schema fragments select the following model shapes:
-
-| Schema | Swift model shape |
-| --- | --- |
-| `{"type":"array","items":{"type":"string"}}` | `[String]` |
-| `{"type":"string","enum":["draft","published"]}` | String-backed enum |
-| `{"type":["string","null"]}` | Nullable string |
-| `{"oneOf":[{"type":"string"},{"type":"integer"}]}` | Codable union with exclusive branch matching |
-| `{"type":"object","additionalProperties":{"type":"integer"}}` | Object retaining integer-valued extra fields |
-| `true` | Generated `AnyValue` |
-
-## Generate your first model
-
-Try the checked-in example from a checkout of this standalone repository:
+From a checkout of this repository, generate the [example schema](Examples/Schemas/pet.json):
 
 ```sh
 swift run -q SwiftJSONSchemaGen --config Examples/swift-json-schema-gen.json
 ```
 
-It writes `Examples/Generated/SchemaTypes.swift`. To use your own schema:
-
-```sh
-swift run -q SwiftJSONSchemaGen --output Models.swift person.schema.json
-```
-
-For this `person.schema.json`:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Person",
-  "type": "object",
-  "properties": {
-    "id": { "type": "integer" },
-    "name": { "type": "string" }
-  },
-  "required": ["id", "name"],
-  "additionalProperties": false
-}
-```
-
-Use the generated model in your application:
+Add `Examples/Generated/SchemaTypes.swift` to your app target, then decode a pet:
 
 ```swift
 import Foundation
 
-let person = Person(id: 42, name: "Ada")
-let data = try JSONEncoder().encode(person)
-let decoded = try JSONDecoder().decode(Person.self, from: data)
-print(decoded.name)
+let json = Data(#"{"id":42,"name":"Mochi"}"#.utf8)
+let pet = try JSONDecoder().decode(Pet.self, from: json)
+print(pet.name) // Mochi
 ```
 
-Build an optimized executable with `swift build -q -c release`. Keep its resource
-bundle beside the executable when installing it; the release archives contain the
-required files together. `SwiftJSONSchemaGen --help` lists the command options.
-
-If you downloaded a binary release, extract the archive and run its executable:
+For your own schema:
 
 ```sh
-./SwiftJSONSchemaGen --output Models.swift person.schema.json
+swift run -q SwiftJSONSchemaGen --output Models.swift Schemas/pet.json
 ```
 
-Add the extracted directory to your `PATH` to run it from elsewhere. Keep the resource
-bundle alongside the executable; copying only the executable is insufficient. Use the
-archive that matches your operating system and architecture.
+To build an optimized executable, run `swift build -q -c release`. If using a binary
+release archive, extract it and run `./SwiftJSONSchemaGen` with the same arguments.
+Keep the resource bundle beside the executable, including when adding its directory
+to `PATH`. Choose the archive for your operating system and architecture.
 
-## Use a configuration file
+## ✨ Features
 
-Commit generation settings alongside your schema:
+### 🔍 Missing and null mean different things
+
+An optional property can still reject null. A required property can allow null and
+still require its key to exist:
 
 ```json
 {
-  "schemas": ["Schemas/person.schema.json"],
+  "title": "Profile",
+  "type": "object",
+  "properties": {
+    "nickname": { "type": "string" },
+    "bio": { "type": ["string", "null"] }
+  },
+  "required": ["bio"],
+  "additionalProperties": false
+}
+```
+
+| JSON input | Decoding result |
+| --- | --- |
+| `{"bio":null}` | Accepted: nickname is absent, bio is explicitly null |
+| `{"bio":"Hello","nickname":"Mochi"}` | Accepted |
+| `{"bio":null,"nickname":null}` | Rejected: nickname must be a string when present |
+| `{}` | Rejected: bio is required |
+
+Required names must be declared in the same schema's `properties`.
+
+### 🎯 Unions reject ambiguous matches
+
+`oneOf` requires exactly one branch to decode successfully:
+
+```json
+{
+  "title": "Measurement",
+  "oneOf": [{ "type": "integer" }, { "type": "number" }]
+}
+```
+
+Decoding `1.5` succeeds through the number branch. Decoding `1` fails because both
+branches match. Use `anyOf` when selecting the first successful branch is intended.
+Matching follows the constraints implemented by generated decoders; unsupported
+assertions produce generation diagnostics.
+
+### 📐 Tuples keep their positions
+
+A coordinate can require exactly two numbers instead of becoming an unrestricted array:
+
+```json
+{
+  "title": "Coordinate",
+  "type": "array",
+  "prefixItems": [{ "type": "number" }, { "type": "number" }],
+  "minItems": 2,
+  "items": false
+}
+```
+
+`[35.68,139.76]` decodes; a missing coordinate, a third element, or a string does not.
+Draft 7 and 2019-09 tuple syntax is also supported. Recursive objects and tuples use
+reference types where needed; recursive unions use indirect enums.
+
+### 🔗 Share schemas without network-dependent builds
+
+Reference another resource by its `$id`, such as
+`{"$ref":"https://example.com/schemas/customer.json#/$defs/Customer"}`, and supply
+both documents:
+
+```sh
+swift run -q SwiftJSONSchemaGen --output Models.swift \
+  Schemas/order.json Schemas/customer.json
+```
+
+The customer document declares `"$id":"https://example.com/schemas/customer.json"`.
+The generator resolves it offline, including anchors and escaped JSON Pointers.
+Missing resources fail explicitly. `$defs` and `definitions` produce namespaced
+Swift declarations with convenience aliases where names are unambiguous.
+
+### 🧰 More than fixed object fields
+
+| Capability | What it lets you express |
+| --- | --- |
+| Typed additional properties | `"additionalProperties":{"type":"integer"}` retains extra fields as integers alongside declared properties |
+| Arbitrary JSON | `"metadata":true` inside `properties` uses generated `AnyValue`; read it with accessors such as `value["name"].stringValue` |
+| Scalar enums and constants | `"const":404` generates a finite value representation whose decoder checks the literal |
+| Object intersections | Supported `allOf` shapes combine properties and required keys; incompatible or unrepresentable intersections fail |
+| Concurrency and visibility | `--sendable` adds Sendable conformance; `--access-level internal` keeps generated APIs inside your module |
+| Reproducible output | Stable ordering, unchanged-file preservation, and `--check` for stale checked-in models |
+
+See the [schema-support matrix](Docs/SchemaSupport.md) for restrictions and decoding guarantees.
+
+## ⚙️ Configuration and CI
+
+Keep settings next to your schemas in `swift-json-schema-gen.json`:
+
+```json
+{
+  "schemas": ["Schemas/pet.json"],
   "output": "Sources/Models/Generated.swift",
   "sendable": true,
+  "accessLevel": "internal",
   "warningsAsErrors": true
 }
 ```
 
 ```sh
 swift run -q SwiftJSONSchemaGen --config swift-json-schema-gen.json
+# Fail CI if checked-in models need regeneration, without changing files:
+swift run -q SwiftJSONSchemaGen --config swift-json-schema-gen.json --check
 ```
 
-Paths in the configuration are relative to that file's directory, so the command
-works from another working directory. Explicit command-line values override the
-configuration. Positional schema paths replace the configured input list. Command-line
-paths are relative to the working directory.
-
-```sh
-swift run -q SwiftJSONSchemaGen --config swift-json-schema-gen.json \
-  --output /tmp/Models.swift --no-sendable
-```
+Configuration paths are relative to the config file. Explicit CLI options override
+config values; positional schema paths replace its input list. CLI paths are relative
+to the working directory. JSON is the supported configuration format.
 
 | CLI | Config key | Default |
 | --- | --- | --- |
 | Schema paths | `schemas` | Required |
 | `--output`, `-o` | `output` | Required unless `--stdout` |
 | `--sendable` / `--no-sendable` | `sendable` | `false` |
+| `--access-level public\|internal` | `accessLevel` | `public` |
 | `--warnings-as-errors` / `--no-warnings-as-errors` | `warningsAsErrors` | `false` |
 | `--check` | — | Check output without writing |
 | `--stdout` | — | Emit source on standard output |
 | `--diagnostics-format json` | — | Human-readable diagnostics by default |
 
-Diagnostics go to standard error, keeping generated source separate. Use `--check`
-to fail CI when checked-in models are stale:
+Diagnostics go to standard error, leaving standard output available for generated
+source. Run `SwiftJSONSchemaGen --help` for all options.
 
-```sh
-swift run -q SwiftJSONSchemaGen --config swift-json-schema-gen.json --check
-```
+## 📦 Swift library
 
-Configuration uses Apple's Swift Configuration package; command-line parsing uses
-Apple's ArgumentParser. JSON is the supported configuration format.
-
-## Choose an integration
-
-### Swift library
-
-Add this repository as a SwiftPM dependency. Replace `YOUR-ORG` with the owner of
-your published repository; version `0.1.0` becomes available after the first release.
+Add the package dependency and library product to your `Package.swift`:
 
 ```swift
+// dependencies:
 .package(url: "https://github.com/YOUR-ORG/SwiftJSONSchemaGen.git", from: "0.1.0")
-```
 
-Add the library product to your target:
-
-```swift
+// your target's dependencies:
 .product(name: "JSONSchemaGeneration", package: "SwiftJSONSchemaGen")
 ```
 
-Generate entirely in memory with `JSONSchemaGenerator`:
+Replace `YOUR-ORG` with the published repository owner; `0.1.0` requires the first
+release. The package is named `SwiftJSONSchemaGen`; the import is `JSONSchemaGeneration`.
+
+Generate in memory from schema bytes supplied by your application:
 
 ```swift
 import Foundation
@@ -175,7 +198,7 @@ import JSONSchemaGeneration
 let schema = Data(#"{"title":"Identifier","type":"string"}"#.utf8)
 let result = try JSONSchemaGenerator().generate(
     resources: [SchemaResource(data: schema, url: URL(fileURLWithPath: "/schemas/id.json"))],
-    options: GenerationOptions(sendable: true)
+    options: GenerationOptions(sendable: true, accessLevel: .internal)
 )
 print(result.source)
 for diagnostic in result.diagnostics {
@@ -183,13 +206,12 @@ for diagnostic in result.diagnostics {
 }
 ```
 
-The library does not write files or fetch references during generation. Supply all
-referenced resources, or use the `generate(schemaURLs:options:)` file-loading
-convenience method. `GeneratedSourceWriter` handles writing a result to disk.
+Generation performs no file writes or network fetches. Supply all referenced resources.
+For files, use `generate(schemaURLs:options:)`; `GeneratedSourceWriter` handles output.
 
-### SwiftPM build tool plugin
+## 🔌 SwiftPM build tool plugin
 
-Attach `SwiftJSONSchemaGenPlugin` to the target that uses the models:
+With the same package dependency, attach the plugin to your consumer target:
 
 ```swift
 .target(
@@ -201,76 +223,42 @@ Attach `SwiftJSONSchemaGenPlugin` to the target that uses the models:
 )
 ```
 
-Place `swift-json-schema-gen.json` in that target's source directory:
+Place this `swift-json-schema-gen.json` in `Sources/Models/`:
 
 ```json
 {
-  "schemas": ["Schemas/person.schema.json"],
+  "schemas": ["Schemas/pet.json"],
   "sendable": true,
   "warningsAsErrors": true
 }
 ```
 
-The plugin owns the output path in SwiftPM's work directory. Include every referenced
-schema in `schemas`; the config and schema files become build inputs. No generated
-file needs to be checked in. Keep schema files excluded from the target's ordinary
-resources, as shown above.
+Include every referenced schema in `schemas`. SwiftPM tracks the config and schemas
+as build inputs and regenerates models when they change. The plugin owns the output
+path in its work directory, so generated files do not need to be checked in. Exclude
+the inputs from ordinary target resources as shown above.
 
-## Schema support
+## 📚 Schema support
 
-This is a **model generator**, not a complete JSON Schema validator. It recognizes
-Draft 7, Draft 2019-09, and Draft 2020-12 and diagnoses unsupported semantics. An
-omitted `$schema` selects Draft 2020-12. Unknown explicit dialects are errors.
+Draft 7, 2019-09, and 2020-12 are recognized; an omitted `$schema` selects 2020-12.
+Unknown explicit dialects fail.
 
-Read the [supported-keyword matrix](Docs/SchemaSupport.md) before generating models
-for an unfamiliar schema. Use `--warnings-as-errors` when a build must reject
-unenforced assertions. Successfully decoding a model does not establish full schema
-validity when you accepted generation warnings.
+This is a structural model generator, not a complete JSON Schema validator.
+Unsupported assertions produce diagnostics, and unrepresentable shapes fail.
+Use `--warnings-as-errors` to reject unenforced assertions during generation;
+accepting warnings means decoded models may accept values the schema forbids.
 
-Supply referenced documents explicitly:
+The [support matrix](Docs/SchemaSupport.md) documents each keyword's behavior,
+including reference naming, tuple restrictions, and unsupported validation families.
 
-```sh
-swift run -q SwiftJSONSchemaGen --sendable --output Models.swift \
-  Schemas/order.json Schemas/customer.json
-```
+## 🤝 Contributing
 
-`$id` gives resources canonical identities; references to supplied resources can use
-those identities without network access. Missing resources fail with a diagnostic.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development commands, verification, and
+release procedures. Tests compile and run generated Swift; GitHub Actions checks
+macOS, Linux, library consumers, and plugin integration before release packaging.
 
-### Names and arbitrary JSON
+[Architecture](ARCHITECTURE.md) · [Changelog](CHANGELOG.md)
 
-Schema titles name root types. `definitions` and `$defs` become nested declarations;
-original property spelling is retained in Codable mappings. Convenience aliases are
-emitted where names are unambiguous.
+## ⚖️ License
 
-Untyped JSON uses a generated `AnyValue` with cases for JSON scalars, arrays, objects,
-and null. It includes accessors and subscripts such as `value["name"].stringValue`.
-`AnyValue` is the sole representation for unconstrained JSON. For example, if a
-schema contains `"metadata": true`, its generated property can hold an object:
-
-```swift
-let metadata = AnyValue.object(["name": .string("Ada"), "active": .boolean(true)])
-print(metadata["name"].stringValue)
-```
-
-`--sendable` adds Sendable conformance to generated types, including `AnyValue`.
-
-## Development and releases
-
-```sh
-swift test -q
-mise run format
-```
-
-The tests compile and run generated models, exercise reference resolution and
-configuration, and use only package-owned fixtures. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for verification and the tagged release procedure. GitHub Actions verifies macOS and
-Linux before packaging release artifacts.
-
-[ARCHITECTURE.md](ARCHITECTURE.md) maps the implementation.
-[CHANGELOG.md](CHANGELOG.md) records compatibility changes.
-
-## License
-
-MIT. See [LICENSE](LICENSE). Third-party dependencies and bundled resources retain
-their own licenses.
+[MIT](LICENSE). Dependencies and bundled resources retain their own licenses.

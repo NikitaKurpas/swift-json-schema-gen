@@ -49,10 +49,17 @@ can model an object without enforcing every assertion in its schema. Unsupported
 semantics must be diagnosed, and the supported-keyword matrix describes the actual
 contract. Do not silently reinterpret a schema merely because Swift has a convenient
 representation for it.
+`SchemaLoader` rejects unrepresented required properties and applicator siblings
+before IR construction; existing unsupported-constraint diagnostics remain visible.
 
 The IR contains Swift model decisions, not CLI paths or rendering fragments. The
 emitter must not rediscover JSON Schema rules. Recursive declarations require an
 explicit finite-size representation; recursion detection alone is insufficient.
+Materialize named definitions before exporting aliases. Every alias must target an
+emitted declaration or a concrete Swift type. Check storage cycles across declaration
+kinds before emission; class and indirect-enum boundaries provide indirection.
+Root aliases use a separate definition namespace because Swift type aliases cannot
+contain nested declarations; reference naming and materialization share that choice.
 
 Generated source order must be deterministic. Schema dictionary order, input order,
 and absolute checkout paths must not leak into output. Preserve the original JSON

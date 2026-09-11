@@ -408,7 +408,7 @@ private func legacyDefinitionChildren(in namespace: JSONValue, pointer: String) 
     }
 }
 
-private func isLegacyDefinitionNamespace(_ value: JSONValue) -> Bool {
+func isLegacyDefinitionNamespace(_ value: JSONValue) -> Bool {
     guard let entries = value.dictionary, !entries.isEmpty else { return false }
     let schemaKeywords: Set<String> = [
         "$anchor", "$comment", "$defs", "$dynamicAnchor", "$dynamicRef", "$id", "$ref",

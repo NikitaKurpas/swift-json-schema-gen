@@ -15,12 +15,12 @@ struct SchemaLoader {
                 json = try JSONValue(data: resource.data)
             } catch {
                 throw GenerationError.schema(
-                    "invalid JSONValue schema '\(url.absoluteString)': \(error)")
+                    "invalid JSON schema '\(url.absoluteString)': \(error)")
             }
 
             guard json.type == .dictionary || json.type == .bool else {
                 throw GenerationError.schema(
-                    "schema resource '\(url.absoluteString)' must contain a JSONValue object or boolean"
+                    "schema resource '\(url.absoluteString)' must contain a JSON object or boolean"
                 )
             }
             guard documents[url] == nil else {
@@ -81,7 +81,7 @@ struct SchemaLoader {
                         vocabulary.isKnownVocabulary(uri, for: draft)
                         ? "is only partially implemented" : "is not recognized"
                     throw GenerationError.schema(
-                        "required JSONValue Schema vocabulary \(detail): '\(uri)' at #\(appendPointer(pointer, "$vocabulary"))"
+                        "required JSON Schema vocabulary \(detail): '\(uri)' at #\(appendPointer(pointer, "$vocabulary"))"
                     )
                 }
                 if !required && !vocabulary.isKnownVocabulary(uri, for: draft) {
@@ -89,7 +89,7 @@ struct SchemaLoader {
                         .init(
                             severity: .warning,
                             message:
-                                "Optional JSONValue Schema vocabulary is not recognized and will be ignored: \(uri)",
+                                "Optional JSON Schema vocabulary is not recognized and will be ignored: \(uri)",
                             sourceURL: sourceURL,
                             pointer: appendPointer(appendPointer(pointer, "$vocabulary"), uri),
                             code: "optional_vocabulary",
@@ -111,7 +111,7 @@ struct SchemaLoader {
                     severity: .warning,
                     message: knownInAnotherDialect
                         ? "Keyword '\(keyword)' does not belong to \(draft.rawValue) and will be ignored"
-                        : "Unknown JSONValue Schema keyword '\(keyword)' will be ignored",
+                        : "Unknown JSON Schema keyword '\(keyword)' will be ignored",
                     sourceURL: sourceURL,
                     pointer: appendPointer(pointer, keyword),
                     code: knownInAnotherDialect ? "wrong_dialect_keyword" : "unknown_keyword",
@@ -146,7 +146,7 @@ struct SchemaLoader {
                 .init(
                     severity: .warning,
                     message:
-                        "Schema has no explicit type, but generation infers '\(inferredType)'; JSONValue Schema also accepts values of other types here",
+                        "Schema has no explicit type, but generation infers '\(inferredType)'; JSON Schema also accepts values of other types here",
                     sourceURL: sourceURL,
                     pointer: pointer,
                     code: "inferred_type",
@@ -155,6 +155,17 @@ struct SchemaLoader {
                     keyword: "type",
                     dialect: draft.rawValue
                 ))
+        }
+
+        if !(draft == .draft7 && schema["$ref"].exists()) {
+            try validateRequiredProperties(in: schema, pointer: pointer, sourceURL: sourceURL)
+            try validateApplicatorSiblings(
+                in: schema,
+                draft: draft,
+                allowedKeywords: allowedKeywords,
+                pointer: pointer,
+                sourceURL: sourceURL
+            )
         }
 
         for child in schemaChildren(of: schema, draft: draft, parentPointer: pointer) {
@@ -279,7 +290,7 @@ struct SchemaLoader {
             if let type = schema["type"].string {
                 guard validTypes.contains(type) else {
                     throw malformedKeyword(
-                        "type", expected: "a JSONValue Schema primitive type name",
+                        "type", expected: "a JSON Schema primitive type name",
                         pointer: pointer,
                         sourceURL: sourceURL)
                 }
@@ -292,7 +303,7 @@ struct SchemaLoader {
                     throw malformedKeyword(
                         "type",
                         expected:
-                            "a non-empty array of unique JSONValue Schema primitive type names",
+                            "a non-empty array of unique JSON Schema primitive type names",
                         pointer: pointer, sourceURL: sourceURL)
                 }
             } else {
@@ -402,6 +413,74 @@ struct SchemaLoader {
     ) -> GenerationError {
         GenerationError.schema(
             "malformed keyword '\(keyword)' at #\(appendPointer(pointer, keyword)) in '\(sourceURL.absoluteString)': expected \(expected)"
+        )
+    }
+
+    private func validateRequiredProperties(
+        in schema: JSONValue,
+        pointer: String,
+        sourceURL: URL
+    ) throws {
+        let declared = Set(schema["properties"].dictionaryValue.keys)
+        let undeclared = Set(schema["required"].arrayValue.compactMap(\.string)).subtracting(
+            declared)
+        guard undeclared.isEmpty else {
+            throw GenerationError.schema(
+                "required properties must be declared in the same schema's properties object at #\(appendPointer(pointer, "required")) in '\(sourceURL.absoluteString)': \(undeclared.sorted().joined(separator: ", "))"
+            )
+        }
+    }
+
+    private func validateApplicatorSiblings(
+        in schema: JSONValue,
+        draft: DraftVersion,
+        allowedKeywords: Set<String>,
+        pointer: String,
+        sourceURL: URL
+    ) throws {
+        let annotationsAndLocations: Set<String> = [
+            "$anchor", "$comment", "$defs", "$dynamicAnchor", "$id", "$schema", "$vocabulary",
+            "contentEncoding", "contentMediaType", "contentSchema", "default", "definitions",
+            "deprecated", "description", "examples", "readOnly", "title", "writeOnly",
+        ]
+        let diagnosed = unsupportedKeywords(in: schema, draft: draft)
+        let active = Set(schema.dictionaryValue.keys)
+            .intersection(allowedKeywords)
+            .subtracting(annotationsAndLocations)
+            .subtracting(diagnosed)
+
+        if draft != .draft7, schema["$ref"].exists() {
+            try rejectUnhandledSiblings(
+                active.subtracting(["$ref"]), applicator: "$ref", pointer: pointer,
+                sourceURL: sourceURL)
+            return
+        }
+        for applicator in ["oneOf", "anyOf"] where schema[applicator].exists() {
+            try rejectUnhandledSiblings(
+                active.subtracting([applicator]), applicator: applicator, pointer: pointer,
+                sourceURL: sourceURL)
+        }
+        if schema["allOf"].exists() {
+            if schema["type"].exists(), schema["type"].string != "object" {
+                try rejectUnhandledSiblings(
+                    ["type"], applicator: "allOf", pointer: pointer, sourceURL: sourceURL)
+            }
+            let represented: Set<String> = ["allOf", "properties", "required", "type"]
+            try rejectUnhandledSiblings(
+                active.subtracting(represented), applicator: "allOf", pointer: pointer,
+                sourceURL: sourceURL)
+        }
+    }
+
+    private func rejectUnhandledSiblings(
+        _ keywords: Set<String>,
+        applicator: String,
+        pointer: String,
+        sourceURL: URL
+    ) throws {
+        guard let keyword = keywords.sorted().first else { return }
+        throw GenerationError.schema(
+            "keyword '\(keyword)' alongside '\(applicator)' cannot be represented without changing JSON Schema semantics at #\(appendPointer(pointer, keyword)) in '\(sourceURL.absoluteString)'"
         )
     }
 

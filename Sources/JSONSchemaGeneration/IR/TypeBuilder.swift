@@ -17,7 +17,8 @@ struct TypeBuilder {
     private var activeDraft: DraftVersion = .draft2020_12
     private var generatedNameCounter = 0
     private var rootNamespaceByDocument: [URL: String] = [:]
-    private var topLevelAliasesByName: [String: String] = [:]
+    private var definitionNamespaceByDocument: [URL: String] = [:]
+    private var topLevelAliasesByName: [String: SwiftType] = [:]
     private var conflictingTopLevelAliases: Set<String> = []
 
     init(documents: [URL: SchemaDocument], resolver: RefResolver, options: GenerationOptions) {
@@ -34,6 +35,26 @@ struct TypeBuilder {
             rootNamespaceByDocument[document.url.standardizedFileURL] =
                 documentRootNamespace(for: document)
         }
+        var reservedNamespaces = Set(rootNamespaceByDocument.values)
+        for document in orderedDocuments {
+            let key = document.url.standardizedFileURL
+            let rootNamespace = rootNamespaceByDocument[key] ?? documentRootNamespace(for: document)
+            activeDraft = document.draft
+            if try rootCanOwnDefinitionNamespace(
+                document.json, documentURL: document.url, draft: document.draft)
+            {
+                definitionNamespaceByDocument[key] = rootNamespace
+            } else {
+                var definitionNamespace = "\(rootNamespace)Definitions"
+                var suffix = 2
+                while reservedNamespaces.contains(definitionNamespace) {
+                    definitionNamespace = "\(rootNamespace)Definitions\(suffix)"
+                    suffix += 1
+                }
+                reservedNamespaces.insert(definitionNamespace)
+                definitionNamespaceByDocument[key] = definitionNamespace
+            }
+        }
 
         // Entry point: each input file's root schema becomes (or contributes to) a top-level Swift type.
         for document in orderedDocuments {
@@ -41,12 +62,9 @@ struct TypeBuilder {
             let rootNamespace =
                 rootNamespaceByDocument[document.url.standardizedFileURL]
                 ?? documentRootNamespace(for: document)
+            let definitionNamespace =
+                definitionNamespaceByDocument[document.url.standardizedFileURL] ?? rootNamespace
             let rootBaseURL = try resolver.effectiveBaseURL(for: document.json, from: document.url)
-            registerTopLevelDefinitionAliases(
-                in: document.json["$defs"].dictionaryValue, rootNamespace: rootNamespace)
-            registerTopLevelDefinitionAliases(
-                in: document.json["definitions"].dictionaryValue, rootNamespace: rootNamespace)
-
             if shouldMaterializeRootType(for: document.json) {
                 let rootType = try typeForSchema(
                     document.json,
@@ -64,54 +82,27 @@ struct TypeBuilder {
             // even when nothing in the root object references them directly.
             try materializeDefinitions(
                 in: document.json["$defs"].dictionaryValue,
-                namespace: [rootNamespace],
+                namespace: [definitionNamespace],
                 documentURL: rootBaseURL,
                 draft: document.draft
             )
             try materializeDefinitions(
                 in: document.json["definitions"].dictionaryValue,
-                namespace: [rootNamespace],
+                namespace: [definitionNamespace],
                 documentURL: rootBaseURL,
                 draft: document.draft
             )
         }
 
+        try validateFiniteSizeDeclarations()
         return declarations.values.sorted(by: { $0.name < $1.name })
     }
 
     var topLevelDefinitionTypeAliases: [TypeAliasIR] {
         topLevelAliasesByName
             .filter { !conflictingTopLevelAliases.contains($0.key) && declarations[$0.key] == nil }
-            .map { TypeAliasIR(name: $0.key, target: $0.value) }
+            .map { TypeAliasIR(name: $0.key, target: $0.value.rendered) }
             .sorted(by: { $0.name < $1.name })
-    }
-
-    private mutating func registerTopLevelDefinitionAliases(
-        in definitions: [String: JSONValue], rootNamespace: String
-    ) {
-        for key in definitions.keys.sorted() {
-            let schema = definitions[key] ?? .null
-            guard isSchemaCandidate(schema) else { continue }
-
-            let aliasName = IdentifierSanitizer.typeName(key, fallback: key)
-            let aliasTarget = definitionTypeName(path: [rootNamespace, key], schema: schema)
-
-            if declarations[aliasName] != nil {
-                conflictingTopLevelAliases.insert(aliasName)
-                topLevelAliasesByName.removeValue(forKey: aliasName)
-                continue
-            }
-
-            if let existing = topLevelAliasesByName[aliasName], existing != aliasTarget {
-                conflictingTopLevelAliases.insert(aliasName)
-                topLevelAliasesByName.removeValue(forKey: aliasName)
-                continue
-            }
-
-            if !conflictingTopLevelAliases.contains(aliasName) {
-                topLevelAliasesByName[aliasName] = aliasTarget
-            }
-        }
     }
 
     private mutating func materializeDefinitions(
@@ -133,7 +124,7 @@ struct TypeBuilder {
                 }
                 let schemaBaseURL = try resolver.effectiveBaseURL(for: schema, from: documentURL)
                 let suggested = definitionTypeName(path: path, schema: schema)
-                _ = try typeForSchema(
+                var type = try typeForSchema(
                     schema,
                     in: schemaBaseURL,
                     suggestedName: suggested,
@@ -142,6 +133,14 @@ struct TypeBuilder {
                     baseAlreadyApplied: true,
                     draft: schemaDraft
                 )
+                if declarations[suggested] == nil, type != .named(suggested),
+                    registerDeclaredTypeAlias(name: suggested, target: type)
+                {
+                    type = .named(suggested)
+                }
+                if namespace.count == 1 {
+                    registerTopLevelDefinitionAlias(key: key, target: type)
+                }
 
                 // Definitions can themselves embed nested `$defs`/`definitions`.
                 try materializeDefinitions(
@@ -157,6 +156,16 @@ struct TypeBuilder {
                     in: schema.dictionaryValue, namespace: path, documentURL: documentURL,
                     draft: draft)
             }
+        }
+    }
+
+    private mutating func registerTopLevelDefinitionAlias(key: String, target: SwiftType) {
+        let name = IdentifierSanitizer.typeName(key, fallback: key)
+        if let existing = topLevelAliasesByName[name], existing != target {
+            conflictingTopLevelAliases.insert(name)
+            topLevelAliasesByName.removeValue(forKey: name)
+        } else if !conflictingTopLevelAliases.contains(name) {
+            topLevelAliasesByName[name] = target
         }
     }
 
@@ -706,7 +715,8 @@ struct TypeBuilder {
                 description: description,
                 elements: elements,
                 additionalElementType: additionalElementType,
-                maximumCount: maximumCount
+                maximumCount: maximumCount,
+                isReferenceType: recursiveTypeNames.contains(name)
             )
         )
         return .named(name)
@@ -890,6 +900,17 @@ struct TypeBuilder {
             )
         }
 
+        if schema["enum"].array != nil || schema["const"].exists() {
+            throw GenerationError.codegen(
+                "enum or const inside object intersections is currently unsupported (type '\(nameHint)')"
+            )
+        }
+        if schema["type"].exists(), schema["type"].string != "object" {
+            throw GenerationError.codegen(
+                "non-object type inside object intersections is unsupported (type '\(nameHint)')"
+            )
+        }
+
         if let allOf = schema["allOf"].array, !allOf.isEmpty {
             var merged: StructIR = .init(name: nameHint, description: nil, properties: [])
             for (index, item) in allOf.enumerated() {
@@ -904,6 +925,23 @@ struct TypeBuilder {
                     merged,
                     with: StructIR(name: nameHint, description: nil, properties: part)
                 )
+            }
+            if !schema["properties"].dictionaryValue.isEmpty || schema["required"].array != nil {
+                var ownSchema = JSONValue.object([:])
+                ownSchema["type"] = .string("object")
+                ownSchema["properties"] = schema["properties"]
+                ownSchema["required"] = schema["required"]
+                if let ownProperties = try objectShape(
+                    from: ownSchema,
+                    documentURL: schemaBaseURL,
+                    nameHint: "\(nameHint).OwnProperties"
+                ) {
+                    merged = try mergeIntersectionStruct(
+                        merged,
+                        with: StructIR(
+                            name: nameHint, description: nil, properties: ownProperties)
+                    )
+                }
             }
             return merged.properties
         }
@@ -1780,6 +1818,71 @@ struct TypeBuilder {
         recursiveTypeNames.formUnion(processingTypeStack[index...])
     }
 
+    private func validateFiniteSizeDeclarations() throws {
+        let declarationNames = declarations.keys.sorted()
+        for name in declarationNames {
+            guard case .typeAliasDecl? = declarations[name] else { continue }
+            if declarationNames.contains(where: { $0.hasPrefix("\(name).") }) {
+                throw GenerationError.codegen(
+                    "a type alias cannot contain nested declarations (type '\(name)')"
+                )
+            }
+        }
+
+        var visiting: [String] = []
+        var visited: Set<String> = []
+
+        func visit(_ name: String) throws {
+            guard !visited.contains(name), let declaration = declarations[name] else { return }
+            if let cycleStart = visiting.firstIndex(of: name) {
+                let cycle = (Array(visiting[cycleStart...]) + [name]).joined(separator: " -> ")
+                throw GenerationError.codegen(
+                    "recursive value declarations require reference indirection (cycle: \(cycle))"
+                )
+            }
+            visiting.append(name)
+            defer { visiting.removeLast() }
+            for dependency in declarationValueDependencies(declaration).sorted() {
+                try visit(dependency)
+            }
+            visited.insert(name)
+        }
+
+        for name in declarationNames {
+            try visit(name)
+        }
+    }
+
+    private func declarationValueDependencies(_ declaration: TypeDeclIR) -> Set<String> {
+        switch declaration {
+        case .structDecl(let value):
+            guard !value.isReferenceType else { return [] }
+            return Set(value.properties.flatMap { directValueDependencies(in: $0.type) })
+        case .enumDecl(let value):
+            guard !value.isIndirect else { return [] }
+            return Set(value.cases.flatMap { directValueDependencies(in: $0.associatedType) })
+        case .tupleDecl(let value):
+            guard !value.isReferenceType else { return [] }
+            return Set(value.elements.flatMap { directValueDependencies(in: $0.type) })
+        case .typeAliasDecl(let value):
+            return directValueDependencies(in: value.target)
+        case .rawStringEnumDecl:
+            return []
+        }
+    }
+
+    private func directValueDependencies(in type: SwiftType?) -> Set<String> {
+        guard let type else { return [] }
+        switch type {
+        case .named(let name):
+            return [name]
+        case .optional(let wrapped):
+            return directValueDependencies(in: wrapped)
+        case .array, .dictionary, .string, .int, .double, .bool, .null, .existential:
+            return []
+        }
+    }
+
     private mutating func typeName(
         from title: String?,
         suggestedName: String,
@@ -1855,29 +1958,7 @@ struct TypeBuilder {
         if value.type == .bool {
             return true
         }
-
-        if value["$ref"].exists() || value["type"].exists() || value["enum"].array != nil
-            || value["const"].exists()
-        {
-            return true
-        }
-
-        if value["properties"].dictionary != nil || value["required"].array != nil {
-            return true
-        }
-
-        if value["allOf"].array != nil || value["anyOf"].array != nil || value["oneOf"].array != nil
-        {
-            return true
-        }
-
-        if value["items"].exists() || value["prefixItems"].exists()
-            || value["additionalProperties"].exists()
-        {
-            return true
-        }
-
-        return false
+        return value.type == .dictionary && !isLegacyDefinitionNamespace(value)
     }
 
     private func typeNameForRef(
@@ -1890,7 +1971,7 @@ struct TypeBuilder {
         if let first = tokens.first, (first == "definitions" || first == "$defs"), tokens.count >= 2
         {
             let rootNamespace =
-                rootNamespaceByDocument[resolvedDocumentURL.standardizedFileURL]
+                definitionNamespaceByDocument[resolvedDocumentURL.standardizedFileURL]
                 ?? IdentifierSanitizer.typeName(
                     resolvedDocumentURL.deletingPathExtension().lastPathComponent,
                     fallback: "Root"
@@ -1997,5 +2078,83 @@ struct TypeBuilder {
             && !hasRef
             && !hasAdditional
         return !isContainerObject
+    }
+
+    private mutating func rootCanOwnDefinitionNamespace(
+        _ schema: JSONValue, documentURL: URL, draft: DraftVersion
+    ) throws -> Bool {
+        let schemaBaseURL = try resolver.effectiveBaseURL(for: schema, from: documentURL)
+        guard shouldMaterializeRootType(for: schema) else { return true }
+        if schema.type == .bool || schema["$ref"].exists() {
+            return false
+        }
+        if schema["enum"].array != nil || schema["const"].exists() {
+            return true
+        }
+        if let allOf = schema["allOf"].array, !allOf.isEmpty {
+            if allOf.count == 1, shouldTreatAllOfAsAlias(schema: schema) {
+                return try rootCanOwnDefinitionNamespace(
+                    allOf[0], documentURL: schemaBaseURL, draft: draft)
+            }
+            return true
+        }
+        for keyword in ["oneOf", "anyOf"] {
+            let variants = schema[keyword].arrayValue
+            let nonNullVariants = variants.filter { !isNullSchema($0) }
+            if variants.count == 2, nonNullVariants.count == 1 {
+                if keyword == "anyOf" {
+                    return false
+                }
+                if try !schemaAllowsNull(nonNullVariants[0], documentURL: schemaBaseURL) {
+                    return false
+                }
+            }
+            if !variants.isEmpty { return true }
+        }
+        if let explicitType = schema["type"].string {
+            return explicitTypeCanOwnDefinitionNamespace(
+                explicitType, schema: schema, draft: draft)
+        }
+        let explicitTypes = schema["type"].arrayValue.compactMap(\.string)
+        if explicitTypes.count == 2, explicitTypes.contains("null"),
+            let nonNull = explicitTypes.first(where: { $0 != "null" })
+        {
+            return explicitTypeCanOwnDefinitionNamespace(nonNull, schema: schema, draft: draft)
+        }
+        if !explicitTypes.isEmpty {
+            return true
+        }
+        if !schema["properties"].dictionaryValue.isEmpty || schema["required"].array != nil
+            || schema["additionalProperties"].exists()
+        {
+            return true
+        }
+        if schema["items"].exists() || schema["prefixItems"].exists() {
+            return arraySchemaCreatesDeclaration(schema, draft: draft)
+        }
+        return false
+    }
+
+    private func explicitTypeCanOwnDefinitionNamespace(
+        _ type: String, schema: JSONValue, draft: DraftVersion
+    ) -> Bool {
+        switch type {
+        case "object":
+            return true
+        case "array":
+            return arraySchemaCreatesDeclaration(schema, draft: draft)
+        default:
+            return false
+        }
+    }
+
+    private func arraySchemaCreatesDeclaration(_ schema: JSONValue, draft: DraftVersion) -> Bool {
+        if schema["items"].type == .bool, schema["items"].bool == false {
+            return true
+        }
+        if draft == .draft2020_12 {
+            return !(schema["prefixItems"].array ?? []).isEmpty
+        }
+        return !(schema["items"].array ?? []).isEmpty
     }
 }

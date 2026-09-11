@@ -47,11 +47,12 @@ struct SwiftEmitter {
             }
         }
         let formatted = source.formatted()
-        let rewritten = PlaceholderIdentifierRewriter(
+        let rewritten = GeneratedSourceRewriter(
             replacements: [
                 unknownValueTypePlaceholder: helperNames.value,
                 unknownNullTypePlaceholder: helperNames.null,
-            ]
+            ],
+            accessLevel: options.accessLevel
         ).rewrite(Syntax(formatted))
         return rewritten.description
     }
@@ -119,7 +120,8 @@ struct SwiftEmitter {
                     description: value.description,
                     elements: value.elements,
                     additionalElementType: value.additionalElementType,
-                    maximumCount: value.maximumCount
+                    maximumCount: value.maximumCount,
+                    isReferenceType: value.isReferenceType
                 )
                 return renderTuple(local, nestedDeclarations: nested)
             case .rawStringEnumDecl(let value):
@@ -950,14 +952,19 @@ struct SwiftEmitter {
     }
 }
 
-private final class PlaceholderIdentifierRewriter: SyntaxRewriter {
+private final class GeneratedSourceRewriter: SyntaxRewriter {
     private let replacements: [String: String]
+    private let accessLevel: GeneratedAccessLevel
 
-    init(replacements: [String: String]) {
+    init(replacements: [String: String], accessLevel: GeneratedAccessLevel) {
         self.replacements = replacements
+        self.accessLevel = accessLevel
     }
 
     override func visit(_ token: TokenSyntax) -> TokenSyntax {
+        if accessLevel == .internal, token.tokenKind == .keyword(.public) {
+            return token.with(\.tokenKind, .keyword(.internal))
+        }
         guard case .identifier(let identifier) = token.tokenKind,
             let replacement = replacements[identifier]
         else {

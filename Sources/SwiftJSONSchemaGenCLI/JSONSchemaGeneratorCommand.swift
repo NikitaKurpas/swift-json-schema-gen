@@ -30,6 +30,9 @@ public struct JSONSchemaGeneratorCommand: AsyncParsableCommand {
     @Flag(inversion: .prefixedNo, help: "Fail generation when a schema produces a warning.")
     var warningsAsErrors: Bool?
 
+    @Option(help: "Access level for generated declarations: public or internal.")
+    var accessLevel: GeneratedAccessLevel?
+
     @Option(help: "Diagnostic output format: human or json.")
     var diagnosticsFormat: DiagnosticsFormat = .human
 
@@ -117,7 +120,8 @@ public struct JSONSchemaGeneratorCommand: AsyncParsableCommand {
             outputURL: outputURL,
             options: GenerationOptions(
                 sendable: sendable ?? fileConfiguration.sendable ?? false,
-                warningsAsErrors: warningsAsErrors ?? fileConfiguration.warningsAsErrors ?? false
+                warningsAsErrors: warningsAsErrors ?? fileConfiguration.warningsAsErrors ?? false,
+                accessLevel: accessLevel ?? fileConfiguration.accessLevel ?? .public
             )
         )
     }
@@ -155,6 +159,8 @@ public struct JSONSchemaGeneratorCommand: AsyncParsableCommand {
         FileHandle.standardError.write(Data(output.utf8))
     }
 }
+
+extension GeneratedAccessLevel: ExpressibleByArgument {}
 
 private struct ResolvedInvocation {
     let schemaURLs: [URL]

@@ -26,14 +26,21 @@ schema. Validate instances separately when full schema validity is required.
 | --- | --- |
 | `$schema` | Recognizes Draft 7, 2019-09, and 2020-12; omitted value defaults to 2020-12 |
 | `$id` | Offline resource identity and relative-reference base URI |
-| `$ref` | Supplied documents, local pointers, and canonical resource identities |
+| `$ref` | Supplied documents, local pointers, and canonical resource identities; modern siblings that cannot be combined are rejected |
 | `$anchor` | Named anchors in supplied 2019-09 and 2020-12 resources |
 | Draft 7 fragment `$id` | Legacy named anchor resolution |
-| `$defs`, `definitions` | Namespaced reusable declarations |
+| `$defs`, `definitions` | Namespaced reusable declarations; reference and declaration-free definitions emit type aliases, including `true` / `{}` as `AnyValue` |
 | JSON Pointer | `~0` / `~1` escaping and URI percent-encoded fragments |
 | Remote URI | An identity for explicitly supplied data; no implicit network fetch |
 | `$vocabulary` | Unknown or partially implemented required vocabularies fail; required annotation-only vocabularies are accepted; unknown optional vocabularies warn |
 | `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor` | Diagnostic; dynamic scope is not implemented |
+
+Definitions normally live under the root type. When the root is a type alias,
+they use a separate `<Root>Definitions` namespace (with a numeric suffix on collision),
+preserving the root's public name. A definition represented by a type alias cannot
+also own nested declarations;
+generation rejects that shape rather than dropping the nested types. Move those
+definitions to a sibling namespace or a concrete model.
 
 Malformed standard keyword shapes fail with a source JSON Pointer. Unknown keywords
 produce `unknown_keyword`; keywords from another dialect produce
@@ -46,6 +53,11 @@ as partially implemented. Required `meta-data`, `format-annotation`, and `conten
 vocabularies are accepted as annotation vocabularies. Declaring a recognized dialect
 is not a claim that the generator implements all its vocabularies.
 
+Draft 7 `$ref` retains its sibling-ignoring behavior. In modern dialects, annotations
+may accompany `$ref`; unsupported constraints retain their diagnostics, while
+unimplemented intersections with model-shaping siblings fail explicitly. The same
+rule applies to `oneOf` and `anyOf` siblings.
+
 ## Model keywords
 
 The implementation and behavioral fixtures are the authority for the supported
@@ -55,7 +67,7 @@ subset. General assertions listed below are not implied by a matching Swift type
 | --- | --- |
 | `type: string/integer/number/boolean` | `String`, `Int`, `Double`, `Bool` |
 | Objects and `properties` | Named Codable models with JSON spelling preserved |
-| `required` and nullable types | Required keys must exist; non-nullable fields reject null, including optional fields when present |
+| `required` and nullable types | Required keys must exist and be declared in the same schema's `properties`; non-nullable fields reject null, including optional fields when present |
 | `additionalProperties` | Extra fields are retained; typed extra fields decode their value type; closed objects reject unknown keys |
 | Homogeneous arrays | Swift arrays of the generated item type |
 | String enums | Raw-value Swift enums |
@@ -65,8 +77,8 @@ subset. General assertions listed below are not implied by a matching Swift type
 | `false` | Rejected where no usable Swift value can represent the schema |
 | `oneOf` | Union representation with exclusive branch matching for supported shapes |
 | `anyOf` | Union representation choosing the first successful supported branch |
-| `allOf` | Object property intersections; incompatible types, non-object members, and `additionalProperties` within members are rejected |
-| Recursive models | Recursive objects use final classes; recursive unions use indirect enums |
+| `allOf` | Single-member aliases or object property intersections; incompatible types and `additionalProperties` in members or beside `allOf` are rejected |
+| Recursive models | Recursive objects and tuples use final classes; recursive unions use indirect enums; alias cycles without safe storage are rejected |
 | Draft 7 / 2019-09 tuple `items` | Required positional prefix; `additionalItems` controls the tail |
 | 2020-12 `prefixItems` | Required positional prefix; `items` controls the tail |
 
@@ -74,6 +86,11 @@ Tuple support currently requires `minItems` to equal the prefix length. Optional
 prefix positions and a larger required tail are rejected. Standalone `items: false`
 arrays produce a model that accepts only an empty array. Tuple `maxItems` bounds are
 checked during decoding.
+
+Required names declared only in another `allOf` member are currently rejected.
+Declare each required name beside its property schema; required-but-undeclared
+additional properties are not represented. An explicit `type` beside `allOf` must
+be the scalar string `"object"`; array-form types are not supported there.
 
 A union matches generated decoding behavior. It cannot enforce branch constraints
 that were reported as unsupported. `anyOf` selects one representation and does not

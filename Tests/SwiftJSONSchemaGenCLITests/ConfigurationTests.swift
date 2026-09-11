@@ -4,7 +4,7 @@ import Testing
 @testable import SwiftJSONSchemaGenCLI
 
 struct ConfigurationTests {
-    @Test func configPathsAreRelativeToConfigAndExplicitNegationOverridesBoolean() async throws {
+    @Test func commandLineOverridesConfigValues() async throws {
         let directory = try makeTemporaryDirectory()
         let schemasDirectory = directory.appending(path: "Schemas", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(
@@ -19,13 +19,15 @@ struct ConfigurationTests {
         {
           "schemas": ["Schemas/configured.json"],
           "output": "Generated/Types.swift",
-          "sendable": true
+          "sendable": true,
+          "accessLevel": "internal"
         }
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
         var command = try JSONSchemaGeneratorCommand.parse([
             "--config", configURL.path,
             "--no-sendable",
+            "--access-level", "public",
         ])
         try await command.run()
 
@@ -33,6 +35,28 @@ struct ConfigurationTests {
             contentsOf: directory.appending(path: "Generated/Types.swift"), encoding: .utf8)
         #expect(output.contains("public struct Configured: Codable"))
         #expect(!output.contains("public struct Configured: Codable, Sendable"))
+    }
+
+    @Test(arguments: ["null", "true", "1", #""package""#])
+    func configRejectsInvalidAccessLevels(_ value: String) async throws {
+        let directory = try makeTemporaryDirectory()
+        let configURL = directory.appending(path: "swift-json-schema-gen.json")
+        try """
+        { "schemas": [], "accessLevel": \(value), "output": "Types.swift" }
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        do {
+            _ = try await FileConfiguration.load(from: configURL)
+            Issue.record("expected invalid accessLevel to be rejected")
+        } catch {
+            #expect(String(describing: error).contains("accessLevel"))
+        }
+    }
+
+    @Test func commandLineRejectsInvalidAccessLevel() {
+        #expect(throws: (any Error).self) {
+            _ = try JSONSchemaGeneratorCommand.parse(["--access-level", "package"])
+        }
     }
 
     @Test func configRejectsUnknownKeysInsteadOfIgnoringTypos() async throws {

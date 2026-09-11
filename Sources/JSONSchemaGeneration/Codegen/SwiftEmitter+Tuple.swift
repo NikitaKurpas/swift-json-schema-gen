@@ -4,7 +4,9 @@ extension SwiftEmitter {
     func renderTuple(_ value: TupleIR, nestedDeclarations: [String]) -> String {
         var lines: [String] = []
         lines.append(contentsOf: documentationLines(value.description, indent: ""))
-        lines.append("public struct \(value.name): Codable\(options.conformancesSuffix) {")
+        let declarationKind = value.isReferenceType ? "final class" : "struct"
+        lines.append(
+            "public \(declarationKind) \(value.name): Codable\(options.conformancesSuffix) {")
         for element in value.elements {
             lines.append(
                 "    public let \(element.name): \(renderType(element.type, topLevel: true))")

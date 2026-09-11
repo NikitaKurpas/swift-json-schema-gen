@@ -1,18 +1,21 @@
 import ArgumentParser
 import Configuration
 import Foundation
+import JSONSchemaGeneration
 
 struct FileConfiguration {
     var schemas: [String]
     var output: String?
     var sendable: Bool?
     var warningsAsErrors: Bool?
+    var accessLevel: GeneratedAccessLevel?
 
     static let empty = FileConfiguration(
         schemas: [],
         output: nil,
         sendable: nil,
-        warningsAsErrors: nil
+        warningsAsErrors: nil,
+        accessLevel: nil
     )
 
     static func load(from url: URL) async throws -> FileConfiguration {
@@ -25,7 +28,9 @@ struct FileConfiguration {
                 schemas: reader.stringArray(forKey: "schemas", default: []),
                 output: reader.string(forKey: "output"),
                 sendable: reader.bool(forKey: "sendable"),
-                warningsAsErrors: reader.bool(forKey: "warningsAsErrors")
+                warningsAsErrors: reader.bool(forKey: "warningsAsErrors"),
+                accessLevel: reader.string(forKey: "accessLevel").flatMap(
+                    GeneratedAccessLevel.init(rawValue:))
             )
         } catch {
             throw ValidationError(
@@ -39,7 +44,7 @@ struct FileConfiguration {
             throw ValidationError("configuration must be a JSON object")
         }
         let allowedKeys: Set<String> = [
-            "schemas", "output", "sendable", "warningsAsErrors",
+            "schemas", "output", "sendable", "warningsAsErrors", "accessLevel",
         ]
         let unknownKeys = Set(object.keys).subtracting(allowedKeys).sorted()
         guard unknownKeys.isEmpty else {
@@ -51,6 +56,9 @@ struct FileConfiguration {
         }
         if let output = object["output"], !(output is String) {
             throw ValidationError("'output' must be a string")
+        }
+        if let accessLevel = object["accessLevel"], !(accessLevel is String) {
+            throw ValidationError("'accessLevel' must be a string")
         }
         for key in ["sendable", "warningsAsErrors"] {
             if let value = object[key], !(value is Bool) {
@@ -65,4 +73,5 @@ private struct DecodedConfiguration: Decodable {
     let output: String?
     let sendable: Bool?
     let warningsAsErrors: Bool?
+    let accessLevel: GeneratedAccessLevel?
 }
