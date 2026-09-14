@@ -1,13 +1,13 @@
 {
-  "originHash" : "2bbecec1e34b2e92025a85e0d1c0e211deada96ba2382059e2f9fe5a15e88072",
+  "originHash" : "85d5d9e328e7ee34b96eaef638df9418897d81aa524a5bd1ea41cf25d05f5caf",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-argument-parser.git",
       "state" : {
-        "revision" : "c5d11a805e765f52ba34ec7284bd4fcd6ba68615",
-        "version" : "1.7.0"
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
       }
     },
     {
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ajevans99/swift-json-schema.git",
       "state" : {
-        "revision" : "c9f125a4fafd7d31abc8491cf176fa1ebf74bc7c",
-        "version" : "0.11.1"
+        "revision" : "c0a9375ea9cd3fd47d875c98ed7f027ea61c03cb",
+        "version" : "0.13.2"
       }
     },
     {
@@ -69,8 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
-        "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
-        "version" : "602.0.0"
+        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
+        "version" : "603.0.2"
       }
     },
     {
